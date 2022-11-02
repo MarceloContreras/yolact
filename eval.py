@@ -148,6 +148,7 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
         if cfg.eval_mask_branch:
             # Masks are drawn on the GPU, so don't copy
             masks = t[3][:args.top_k]
+            #np.save('mask_data',masks.cpu().numpy()) # EDIT: Saves masks in numpy data format 
         classes, scores, boxes = [x[:args.top_k].cpu().numpy() for x in t[:3]]
 
     num_dets_to_consider = min(args.top_k, classes.shape[0])
@@ -184,6 +185,9 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
     # First, draw the masks on the GPU where we can do it really fast
     # Beware: very fast but possibly unintelligible mask-drawing code ahead
     # I wish I had access to OpenGL or Vulkan but alas, I guess Pytorch tensor operations will have to suffice
+    
+    """ MODIFIED BY MARCELO TO EXTRACT INFORMATION
+    """
     if args.display_masks and cfg.eval_mask_branch:
         # After this, mask is of size [num_dets, h, w, 1]
         masks = masks[:num_dets_to_consider, :, :, None]
@@ -194,7 +198,7 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
         colors = torch.cat([torch.FloatTensor(get_color(j, on_gpu=img.device.index)).view(1, 1, 1, 3) for j in range(num_dets_to_consider)], dim=0)
         # for j in range num_dets_to_consider
         masks_color = masks.repeat(1, 1, 1, 3) * colors * mask_alpha
-
+        
         # This is 1 everywhere except for 1-mask_alpha where the mask is
         inv_alph_masks = masks * (-mask_alpha) + 1
         
@@ -208,7 +212,35 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
             masks_color_summand += masks_color_cumul.sum(dim=0)
 
         img_gpu = img_gpu * inv_alph_masks.prod(dim=0) + masks_color_summand
-        
+    
+    
+    """
+    if args.display_masks and cfg.eval_mask_branch and num_dets_to_consider > 0:
+        masks = masks[:num_dets_to_consider, :, :, None]
+        nzCount = -1
+        for i in range(num_dets_to_consider):
+            temp_class_check = cfg.dataset.class_names[classes[i]]
+            if temp_class_check == 'car':
+                msk = masks[i, :, :, None]
+                mask = msk.view(1, masks.shape[1], masks.shape[2], masks.shape[3])
+                img_gpu = (mask.sum(dim=0) >= 1).float().expand(-1, -1, 3).contiguous()
+                img_numpy_aux = (img_gpu * 255).byte().cpu().numpy()
+                img_numpy_aux = cv2.cvtColor(img_numpy_aux, cv2.COLOR_BGR2GRAY)
+    
+                if nzCount == -1:
+                    nzCount = 0
+                    img_numpy = img_numpy_aux
+                else:
+                    if cv2.countNonZero(img_numpy_aux) > cv2.countNonZero(img_numpy):
+                        img_numpy = img_numpy_aux
+    
+        img_gpu = (masks.sum(dim=0) >= 1).float().expand(-1, -1, 3).contiguous()
+    
+    else:
+        img_gpu *= 0
+    """
+    
+    
     # Then draw the stuff that needs to be done on the cpu
     # Note, make sure this is a uint8 tensor or opencv will not anti alias text for whatever reason
     img_numpy = (img_gpu * 255).byte().cpu().numpy()
